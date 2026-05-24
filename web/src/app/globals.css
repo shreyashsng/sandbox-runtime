@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg-base: #0a0a0f;
+  --color-bg-surface: #111118;
+  --color-bg-elevated: #1a1a24;
+  --color-bg-overlay: #22222f;
+
+  --color-border-subtle: #1e1e2e;
+  --color-border-default: #2a2a3d;
+  --color-border-strong: #3d3d56;
+
+  --color-text-primary: #e8e8f0;
+  --color-text-secondary: #8888a8;
+  --color-text-muted: #4a4a6a;
+  --color-text-inverse: #0a0a0f;
+
+  --color-accent: #6c63ff;
+  --color-accent-hover: #7c74ff;
+  --color-accent-dim: rgba(108, 99, 255, 0.12);
+  --color-accent-glow: rgba(108, 99, 255, 0.25);
+
+  --color-success: #22c55e;
+  --color-success-dim: rgba(34, 197, 94, 0.1);
+  --color-warning: #f59e0b;
+  --color-warning-dim: rgba(245, 158, 11, 0.1);
+  --color-error: #ef4444;
+  --color-error-dim: rgba(239, 68, 68, 0.1);
+  --color-info: #38bdf8;
+  --color-info-dim: rgba(56, 189, 248, 0.1);
+
+  --color-terminal-bg: #07070d;
+  --color-terminal-text: #d4d4d8;
+  --color-terminal-green: #22c55e;
+  --color-terminal-red: #ef4444;
+  --color-terminal-yellow: #f59e0b;
+  --color-terminal-dim: #52525b;
+
+  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+  --font-sans: "Inter", "Geist", sans-serif;
+}
+
+@layer base {
+  :root {
+    --bg-base: #0a0a0f;
+    --bg-surface: #111118;
+    --text-primary: #e8e8f0;
+  }
+
+  body {
+    background-color: var(--bg-base);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+  }
+}
