@@ -1,11 +1,32 @@
 import { Worker, Job } from "bullmq";
+import Redis from "ioredis";
 import { redisClient } from "../lib/redis";
 import { logger } from "../lib/logger";
 import { prisma } from "../db/client";
 import { JobPayload } from "../types";
-import { runInDocker } from "./executor";
+import { runInDocker, runningContainers } from "./executor";
+import { publishChunk } from "./streamer";
 
 const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || "5", 10);
+
+const subscriber = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
+subscriber.psubscribe("execution:*");
+subscriber.on("pmessage", (pattern, channel, messageStr) => {
+  try {
+    const message = JSON.parse(messageStr);
+    if (message.type === "cancel") {
+      const jobId = channel.replace("execution:", "");
+      const container = runningContainers.get(jobId);
+      if (container) {
+        logger.info(`Received cancel for jobId ${jobId}, killing container`);
+        container.kill().catch((err: any) => logger.error(`Error killing container ${jobId}`, err));
+      }
+    }
+  } catch (err) {
+    logger.error("Error parsing pubsub message", err);
+  }
+});
+
 
 export function startWorker() {
   const worker = new Worker(
@@ -52,6 +73,12 @@ export function startWorker() {
           durationMs: result.durationMs,
           memoryUsedMb: result.memoryUsedMb,
         },
+      });
+
+      publishChunk(payload.jobId, "done", {
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+        status: finalStatus,
       });
 
       return result;

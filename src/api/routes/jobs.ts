@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import { apiKeyAuth } from "../middleware/auth";
 import { prisma } from "../../db/client";
 import { executionQueue } from "../../lib/queue";
+import { redisClient } from "../../lib/redis";
 
 const router = Router();
 
@@ -81,12 +82,7 @@ router.delete("/:jobId", apiKeyAuth, async (req: Request, res: Response, next: N
         data: { status: "killed" },
       });
     } else if (execution.status === "running") {
-      // Phase 2: send cancel event via redis pub/sub
-      // For now just update DB
-      await prisma.execution.update({
-        where: { jobId: execution.jobId },
-        data: { status: "killed" },
-      });
+      redisClient.publish(`execution:${execution.jobId}`, JSON.stringify({ type: "cancel" }));
     }
 
     res.json({ success: true });

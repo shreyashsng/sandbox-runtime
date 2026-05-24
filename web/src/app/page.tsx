@@ -2,23 +2,25 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import Editor from "@monaco-editor/react";
-import { Play } from "lucide-react";
+import { Play, Square } from "lucide-react";
+import { TerminalComponent, TerminalRef } from "../components/terminal/Terminal";
 
 export default function Home() {
   const [language, setLanguage] = useState<"nodejs" | "python">("nodejs");
   const [code, setCode] = useState<string>("console.log('hello from sandbox');");
   const [jobId, setJobId] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("idle");
-  const [output, setOutput] = useState<{ stdout: string; stderr: string }>({ stdout: "", stderr: "" });
   const [duration, setDuration] = useState<number | null>(null);
 
-  const pollInterval = useRef<NodeJS.Timeout | null>(null);
+  const terminalRef = useRef<TerminalRef>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
   const handleRun = async () => {
     if (!code) return;
     setStatus("queued");
-    setOutput({ stdout: "", stderr: "" });
     setDuration(null);
+    terminalRef.current?.clear();
+    terminalRef.current?.write("[system] sending execution request...\r\n", "system");
 
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/execute`, {
@@ -36,45 +38,62 @@ export default function Home() {
 
       const data = await res.json();
       setJobId(data.jobId);
-      setStatus("queued");
     } catch (err: any) {
-      setOutput({ stdout: "", stderr: err.message });
+      terminalRef.current?.write(err.message + "\r\n", "stderr");
       setStatus("failed");
     }
   };
 
-  useEffect(() => {
-    if (!jobId || ["success", "failed", "killed"].includes(status)) {
-      if (pollInterval.current) clearInterval(pollInterval.current);
-      return;
+  const handleCancel = async () => {
+    if (!jobId) return;
+    try {
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/job/${jobId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${process.env.NEXT_PUBLIC_DEV_API_KEY}`,
+        },
+      });
+    } catch (err: any) {
+      console.error("Cancel failed", err);
     }
+  };
 
-    const poll = async () => {
+  useEffect(() => {
+    if (!jobId) return;
+
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3001";
+    const ws = new WebSocket(`${wsUrl}/stream?jobId=${jobId}`);
+    wsRef.current = ws;
+
+    ws.onmessage = (event) => {
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/job/${jobId}`, {
-          headers: {
-            Authorization: `Bearer ${process.env.NEXT_PUBLIC_DEV_API_KEY}`,
-          },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setStatus(data.status);
-          setOutput({ stdout: data.stdout || "", stderr: data.stderr || "" });
-          if (data.durationMs !== null) {
-            setDuration(data.durationMs);
+        const message = JSON.parse(event.data);
+        if (message.type === "stdout" || message.type === "stderr" || message.type === "system") {
+          terminalRef.current?.write(message.chunk, message.type);
+          setStatus((prev) => (prev === "queued" ? "running" : prev));
+        } else if (message.type === "done") {
+          setStatus(message.status);
+          if (message.durationMs !== null && message.durationMs !== undefined) {
+            setDuration(message.durationMs);
           }
         }
       } catch (e) {
-        console.error("Polling error", e);
+        console.error("Error parsing WS message", e);
       }
     };
 
-    pollInterval.current = setInterval(poll, 1500);
+    ws.onclose = () => {
+      terminalRef.current?.write("\r\n[system] connection closed\r\n", "system");
+    };
+
+    ws.onerror = () => {
+      terminalRef.current?.write("\r\n[system] connection error\r\n", "system");
+    };
 
     return () => {
-      if (pollInterval.current) clearInterval(pollInterval.current);
+      ws.close();
     };
-  }, [jobId, status]);
+  }, [jobId]);
 
   const handleLanguageChange = (lang: "nodejs" | "python") => {
     setLanguage(lang);
@@ -125,7 +144,7 @@ export default function Home() {
   return (
     <div className="flex flex-col md:flex-row h-screen p-6 gap-6 bg-[var(--color-bg-base)] text-[var(--color-text-primary)]">
       {/* Editor Panel */}
-      <div className="flex-1 flex flex-col bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-lg p-4">
+      <div className="flex-1 min-w-0 flex flex-col bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-lg p-4">
         <div className="flex justify-between items-center mb-4">
           <div className="flex gap-2">
             <button
@@ -149,14 +168,23 @@ export default function Home() {
               python
             </button>
           </div>
-          <button
-            onClick={handleRun}
-            disabled={status === "running" || status === "queued"}
-            className="flex items-center gap-2 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-text-inverse)] px-4 py-2 rounded-md font-mono text-sm disabled:opacity-50 transition-colors"
-          >
-            <Play size={16} />
-            run
-          </button>
+          {status === "queued" || status === "running" ? (
+            <button
+              onClick={handleCancel}
+              className="flex items-center gap-2 bg-[#ef44441a] hover:bg-[#ef444433] text-[#ef4444] border border-[#ef44444d] px-4 py-2 rounded-md font-mono text-sm transition-colors"
+            >
+              <Square size={16} />
+              cancel
+            </button>
+          ) : (
+            <button
+              onClick={handleRun}
+              className="flex items-center gap-2 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-text-inverse)] px-4 py-2 rounded-md font-mono text-sm transition-colors"
+            >
+              <Play size={16} />
+              run
+            </button>
+          )}
         </div>
         <div className="flex-1 min-h-[500px] border border-[var(--color-border-subtle)] rounded-md overflow-hidden">
           <Editor
@@ -176,7 +204,7 @@ export default function Home() {
       </div>
 
       {/* Output Panel */}
-      <div className="flex-1 flex flex-col bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-lg p-4">
+      <div className="flex-1 min-w-0 flex flex-col bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-lg p-4">
         <div className="flex justify-between items-center mb-4 h-[38px]">
           {renderBadge()}
           {duration !== null && (
@@ -185,22 +213,8 @@ export default function Home() {
             </div>
           )}
         </div>
-        <div className="flex-1 bg-[var(--color-terminal-bg)] border border-[var(--color-border-subtle)] rounded-md p-4 overflow-auto font-mono text-[13px] leading-[1.7]">
-          {output.stdout && (
-            <pre className="text-[var(--color-terminal-text)] m-0 break-all whitespace-pre-wrap">
-              {output.stdout}
-            </pre>
-          )}
-          {output.stderr && (
-            <pre className="text-[var(--color-terminal-red)] m-0 break-all whitespace-pre-wrap">
-              {output.stderr}
-            </pre>
-          )}
-          {!output.stdout && !output.stderr && status === "idle" && (
-            <div className="text-[var(--color-terminal-dim)]">
-              No executions yet. Submit code to get started.
-            </div>
-          )}
+        <div className="flex-1 min-h-[500px] min-w-0 overflow-hidden">
+          <TerminalComponent ref={terminalRef} />
         </div>
       </div>
     </div>

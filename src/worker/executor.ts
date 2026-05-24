@@ -3,6 +3,10 @@ import path from "path";
 import os from "os";
 import { dockerClient } from "../lib/docker";
 import { JobPayload } from "../types";
+import { PassThrough } from "stream";
+import { publishChunk } from "./streamer";
+
+export const runningContainers = new Map<string, any>();
 
 const EXECUTION_TIMEOUT_MS = parseInt(process.env.EXECUTION_TIMEOUT_MS || "30000", 10);
 
@@ -45,8 +49,32 @@ export async function runInDocker(payload: JobPayload): Promise<{
     User: "sandbox",
   });
 
+  runningContainers.set(jobId, container);
+
+  let stdout = "";
+  let stderr = "";
+
   const startTime = Date.now();
   await container.start();
+  publishChunk(jobId, "system", "[system] container started\r\n");
+
+  const logStream = await container.logs({ follow: true, stdout: true, stderr: true });
+  const stdoutStream = new PassThrough();
+  const stderrStream = new PassThrough();
+
+  stdoutStream.on("data", (chunk) => {
+    const text = chunk.toString("utf8");
+    stdout += text;
+    publishChunk(jobId, "stdout", text);
+  });
+
+  stderrStream.on("data", (chunk) => {
+    const text = chunk.toString("utf8");
+    stderr += text;
+    publishChunk(jobId, "stderr", text);
+  });
+
+  container.modem.demuxStream(logStream, stdoutStream, stderrStream);
 
   let isTimeout = false;
   let exitCode = 0;
@@ -63,6 +91,7 @@ export async function runInDocker(payload: JobPayload): Promise<{
     ]);
     const inspect = await container.inspect();
     exitCode = inspect.State.ExitCode;
+    if (exitCode === 137) exitCode = -1; // Docker killed exit code
   } catch (error: any) {
     if (isTimeout) {
       await container.kill().catch(() => {});
@@ -70,35 +99,14 @@ export async function runInDocker(payload: JobPayload): Promise<{
     } else {
       throw error;
     }
+  } finally {
+    runningContainers.delete(jobId);
   }
 
   const durationMs = Date.now() - startTime;
-
-  const rawLogs = await container.logs({ stdout: true, stderr: true, follow: false }) as any as Buffer;
   
-  let stdout = "";
-  let stderr = "";
-  
-  if (rawLogs && Buffer.isBuffer(rawLogs)) {
-    let offset = 0;
-    while (offset < rawLogs.length) {
-      if (offset + 8 > rawLogs.length) break;
-      const type = rawLogs[offset];
-      const length = rawLogs.readUInt32BE(offset + 4);
-      offset += 8;
-      
-      if (offset + length > rawLogs.length) break;
-      const payload = rawLogs.subarray(offset, offset + length).toString("utf8");
-      
-      if (type === 1) {
-        stdout += payload;
-      } else if (type === 2) {
-        stderr += payload;
-      }
-      
-      offset += length;
-    }
-  }
+  // allow streams to flush
+  await new Promise(r => setTimeout(r, 50));
 
   let memoryUsedMb = 0;
   try {
