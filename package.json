@@ -1,0 +1,43 @@
+{
+  "name": "srai-api",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "ts-node-dev --respawn src/api/index.ts",
+    "dev:worker": "ts-node-dev --respawn src/worker/index.ts",
+    "build": "tsc",
+    "db:migrate": "prisma migrate dev --schema src/db/schema.prisma",
+    "db:generate": "prisma generate --schema src/db/schema.prisma",
+    "db:seed": "ts-node src/db/seed.ts",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:images": "docker build -f docker/node.Dockerfile -t srai-node:latest . && docker build -f docker/python.Dockerfile -t srai-python:latest ."
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "bullmq": "^5.77.1",
+    "cors": "^2.8.6",
+    "dockerode": "^5.0.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "helmet": "^8.2.0",
+    "ioredis": "^5.10.1",
+    "jsonwebtoken": "^9.0.3",
+    "morgan": "^1.10.1",
+    "nanoid": "^5.1.11",
+    "prisma": "^5.22.0",
+    "ws": "^8.21.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/dockerode": "^4.0.1",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/morgan": "^1.9.10",
+    "@types/node": "^25.9.1",
+    "@types/ws": "^8.18.1",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^6.0.3"
+  }
+}
