@@ -6,6 +6,8 @@ import { prisma } from "../db/client";
 import { JobPayload } from "../types";
 import { runInDocker, runningContainers } from "./executor";
 import { publishChunk } from "./streamer";
+import cron from "node-cron";
+import { dockerClient } from "../lib/docker";
 
 const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || "5", 10);
 
@@ -29,6 +31,35 @@ subscriber.on("pmessage", (pattern, channel, messageStr) => {
 
 
 export function startWorker() {
+  cron.schedule("0 * * * *", async () => {
+    try {
+      const expiredSessions = await prisma.session.findMany({
+        where: { expiresAt: { lt: new Date() } }
+      });
+      
+      if (expiredSessions.length > 0) {
+        for (const session of expiredSessions) {
+          try {
+            const volume = dockerClient.getVolume(session.volumeName);
+            await volume.remove();
+          } catch (e: any) {
+            if (e.statusCode !== 404) {
+              logger.error(`Failed to remove volume for expired session ${session.id}`, e);
+            }
+          }
+        }
+        
+        await prisma.session.deleteMany({
+          where: { expiresAt: { lt: new Date() } }
+        });
+        
+        logger.info(`Cleaned up ${expiredSessions.length} expired sessions`);
+      }
+    } catch (err) {
+      logger.error("Error in session cleanup cron job", err);
+    }
+  });
+
   const worker = new Worker(
     "executions",
     async (job: Job) => {

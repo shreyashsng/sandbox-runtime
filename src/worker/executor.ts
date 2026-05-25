@@ -5,6 +5,7 @@ import { dockerClient } from "../lib/docker";
 import { JobPayload } from "../types";
 import { PassThrough } from "stream";
 import { publishChunk } from "./streamer";
+import { prisma } from "../db/client";
 
 export const runningContainers = new Map<string, any>();
 
@@ -27,18 +28,51 @@ export async function runInDocker(payload: JobPayload): Promise<{
   await fs.writeFile(filepath, code, "utf8");
 
   const image = language === "nodejs" ? "srai-node:latest" : "srai-python:latest";
-  const cmd = language === "nodejs" ? ["node", `/sandbox/${filename}`] : ["python", `/sandbox/${filename}`];
+  const cmd = language === "nodejs" ? ["node", `/sandbox/${filename}`] : ["python", "-u", `/sandbox/${filename}`];
 
   // Map to absolute path for Docker
   // Replace windows backslashes with forward slashes for Docker desktop bind mounts if needed,
   // but dockerode usually handles absolute paths fine.
   const bindPath = tempDir.replace(/\\/g, '/');
 
+  const binds = [`${bindPath}:/sandbox:ro`];
+
+  if (payload.sessionId) {
+    const session = await prisma.session.findUnique({
+      where: { id: payload.sessionId },
+    });
+    if (session) {
+      // Ensure volume is owned by the sandbox user (UID/GID 2000)
+      const chownContainer = await dockerClient.createContainer({
+        Image: image,
+        User: "root",
+        Cmd: ["chown", "-R", "2000:2000", "/session"],
+        HostConfig: {
+          Binds: [`${session.volumeName}:/session:rw`],
+        },
+      });
+      try {
+        await chownContainer.start();
+        await chownContainer.wait();
+      } catch (err) {
+        // Log but continue to avoid blocking execution if docker fails
+      } finally {
+        await chownContainer.remove({ force: true }).catch(() => {});
+      }
+
+      binds.push(`${session.volumeName}:/session:rw`);
+      await prisma.session.update({
+        where: { id: session.id },
+        data: { lastUsedAt: new Date() },
+      });
+    }
+  }
+
   const container = await dockerClient.createContainer({
     Image: image,
     Cmd: cmd,
     HostConfig: {
-      Binds: [`${bindPath}:/sandbox:ro`],
+      Binds: binds,
       NetworkMode: "none",
       Memory: 512 * 1024 * 1024,
       MemorySwap: 512 * 1024 * 1024,

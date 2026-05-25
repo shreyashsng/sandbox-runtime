@@ -13,6 +13,7 @@ import healthRouter from "./routes/health";
 import executeRouter from "./routes/execute";
 import jobsRouter from "./routes/jobs";
 import keysRouter from "./routes/keys";
+import sessionsRouter from "./routes/sessions";
 
 import { WebSocketServer } from "ws";
 import Redis from "ioredis";
@@ -31,6 +32,7 @@ app.use("/health", healthRouter);
 app.use("/execute", executeRouter);
 app.use("/job", jobsRouter);
 app.use("/api-keys", keysRouter);
+app.use("/session", sessionsRouter);
 
 app.use((req, res) => {
   res.status(404).json({ error: "Not Found", code: "NOT_FOUND" });

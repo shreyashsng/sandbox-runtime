@@ -1,4 +1,4 @@
 FROM node:20-alpine
-RUN addgroup -S sandbox && adduser -S sandbox -G sandbox
+RUN addgroup -g 2000 -S sandbox && adduser -u 2000 -S sandbox -G sandbox
 WORKDIR /sandbox
 USER sandbox

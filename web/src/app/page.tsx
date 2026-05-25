@@ -1,16 +1,21 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, Suspense } from "react";
 import Editor from "@monaco-editor/react";
 import { Play, Square } from "lucide-react";
 import { TerminalComponent, TerminalRef } from "../components/terminal/Terminal";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
-export default function Home() {
+function SandboxEditor() {
   const [language, setLanguage] = useState<"nodejs" | "python">("nodejs");
   const [code, setCode] = useState<string>("console.log('hello from sandbox');");
   const [jobId, setJobId] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("idle");
   const [duration, setDuration] = useState<number | null>(null);
+
+  const searchParams = useSearchParams();
+  const sessionId = searchParams.get("sessionId");
 
   const terminalRef = useRef<TerminalRef>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -29,7 +34,7 @@ export default function Home() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${process.env.NEXT_PUBLIC_DEV_API_KEY}`,
         },
-        body: JSON.stringify({ language, code }),
+        body: JSON.stringify({ language, code, sessionId: sessionId || undefined }),
       });
 
       if (!res.ok) {
@@ -142,12 +147,27 @@ export default function Home() {
   };
 
   return (
-    <div className="flex flex-col md:flex-row h-screen p-6 gap-6 bg-[var(--color-bg-base)] text-[var(--color-text-primary)]">
-      {/* Editor Panel */}
-      <div className="flex-1 min-w-0 flex flex-col bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-lg p-4">
-        <div className="flex justify-between items-center mb-4">
-          <div className="flex gap-2">
-            <button
+    <div className="flex flex-col h-screen bg-[var(--color-bg-base)] text-[var(--color-text-primary)] overflow-hidden">
+      {/* Top Nav */}
+      <div className="flex items-center justify-between px-6 py-3 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
+        <h1 className="font-mono font-bold text-[var(--color-accent)]">SRAI Sandbox</h1>
+        <div className="flex gap-4">
+          <Link href="/" className="font-mono text-sm text-[var(--color-text-primary)] hover:text-[var(--color-accent)]">
+            Editor
+          </Link>
+          <Link href="/sessions" className="font-mono text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-accent)]">
+            Sessions
+          </Link>
+        </div>
+      </div>
+      
+      {/* Main Content */}
+      <div className="flex flex-col md:flex-row flex-1 p-6 gap-6 overflow-hidden">
+        {/* Editor Panel */}
+        <div className="flex-1 min-w-0 flex flex-col bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-lg p-4">
+          <div className="flex justify-between items-center mb-4">
+            <div className="flex gap-2">
+              <button
               onClick={() => handleLanguageChange("nodejs")}
               className={`px-3 py-1.5 rounded-md font-mono text-sm transition-colors ${
                 language === "nodejs" 
@@ -217,6 +237,15 @@ export default function Home() {
           <TerminalComponent ref={terminalRef} />
         </div>
       </div>
+      </div>
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<div className="h-screen bg-[var(--color-bg-base)] text-[var(--color-text-primary)] flex items-center justify-center font-mono">Loading...</div>}>
+      <SandboxEditor />
+    </Suspense>
   );
 }
