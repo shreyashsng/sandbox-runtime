@@ -41,6 +41,37 @@ curl http://localhost:3001/job/JOB_ID \
 
 ---
 
+## System Architecture
+
+```mermaid
+flowchart TD
+
+A[Next.js Dashboard<br/>Execution History • Logs • Metrics]
+
+B[Express API Server<br/>REST • WebSocket • MCP Endpoints]
+
+C[Redis<br/>Queue • Pub/Sub • Session Cache]
+
+D[BullMQ Worker Pool<br/>Job Execution Layer]
+
+E[Docker Sandbox Layer<br/>Node • Python • Go Runtimes]
+
+F[PostgreSQL<br/>Executions • Sessions • Telemetry]
+
+A <-->|HTTP / WebSocket| B
+
+B -->|Queue Jobs| C
+C --> D
+
+D -->|Runs Code in Containers| E
+E -->|Execution Results| D
+
+B <-->|Pub/Sub Streaming| C
+
+B -->|Store Logs & Metadata| F
+D -->|Execution Logs| F
+```
+
 ## Phase 2 — Real-Time Streaming
 
 ### Architecture
