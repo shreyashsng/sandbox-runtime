@@ -2,7 +2,7 @@ import { WebSocket } from "ws";
 
 const activeStreams = new Map<string, Set<WebSocket>>();
 
-export function registerStream(jobId: string, ws: WebSocket) {
+export function registerStream(jobId: string, ws: WebSocket, onEmpty?: () => void) {
   if (!activeStreams.has(jobId)) {
     activeStreams.set(jobId, new Set());
   }
@@ -14,6 +14,9 @@ export function registerStream(jobId: string, ws: WebSocket) {
       streams.delete(ws);
       if (streams.size === 0) {
         activeStreams.delete(jobId);
+        if (onEmpty) {
+          onEmpty();
+        }
       }
     }
   });

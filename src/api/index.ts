@@ -82,7 +82,9 @@ wss.on("connection", async (ws, req) => {
       return;
     }
 
-    registerStream(jobId, ws);
+    registerStream(jobId, ws, () => {
+      redisSubscriber.unsubscribe(`execution:${jobId}`);
+    });
 
     if (execution.status === "success" || execution.status === "failed" || execution.status === "killed") {
       ws.send(JSON.stringify({ type: "stdout", chunk: execution.stdout, ts: Date.now() }));
