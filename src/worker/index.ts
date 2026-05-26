@@ -1,3 +1,6 @@
+import fs from "fs/promises";
+import os from "os";
+import path from "path";
 import { Worker, Job } from "bullmq";
 import Redis from "ioredis";
 import { redisClient } from "../lib/redis";
@@ -8,6 +11,36 @@ import { runInDocker, runningContainers } from "./executor";
 import { publishChunk } from "./streamer";
 import cron from "node-cron";
 import { dockerClient } from "../lib/docker";
+
+async function cleanupTempFolders() {
+  try {
+    const tmpDir = os.tmpdir();
+    const files = await fs.readdir(tmpDir);
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    
+    let deletedCount = 0;
+    for (const file of files) {
+      if (file.startsWith("srai-")) {
+        const fullPath = path.join(tmpDir, file);
+        try {
+          const stats = await fs.stat(fullPath);
+          if (stats.isDirectory() && stats.mtimeMs < oneHourAgo) {
+            await fs.rm(fullPath, { recursive: true, force: true });
+            deletedCount++;
+          }
+        } catch (err) {
+          // ignore individual folder stat/rm errors
+        }
+      }
+    }
+    if (deletedCount > 0) {
+      logger.info(`Cleaned up ${deletedCount} leaked temp folders`);
+    }
+  } catch (err) {
+    logger.error("Failed to run temp folder cleanup", err);
+  }
+}
+
 
 const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || "5", 10);
 
@@ -31,6 +64,8 @@ subscriber.on("pmessage", (pattern, channel, messageStr) => {
 
 
 export function startWorker() {
+  cleanupTempFolders();
+
   cron.schedule("0 * * * *", async () => {
     try {
       const expiredSessions = await prisma.session.findMany({
