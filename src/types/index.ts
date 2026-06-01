@@ -34,7 +34,11 @@ export const ExecutionRequestSchema = z.object({
   language: z.enum(["nodejs", "python"]),
   code: z.string(),
   sessionId: z.string().optional(),
-  packages: z.array(z.string()).optional(),
+  packages: z.array(
+    z.string()
+      .max(64, "Package name must be less than 64 characters")
+      .regex(/^[a-zA-Z0-9\-_.@/]+$/, "Invalid package name")
+  ).max(10, "Maximum 10 packages allowed per request").optional(),
   timeoutMs: z.number().optional(),
 });
 

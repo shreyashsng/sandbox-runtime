@@ -6,6 +6,7 @@ import { JobPayload } from "../types";
 import { PassThrough } from "stream";
 import { publishChunk } from "./streamer";
 import { prisma } from "../db/client";
+import { redisClient } from "../lib/redis";
 
 export const runningContainers = new Map<string, any>();
 
@@ -68,9 +69,98 @@ export async function runInDocker(payload: JobPayload): Promise<{
     }
   }
 
+  if (payload.packages && payload.packages.length > 0) {
+    const pkgSetKey = `pkg_cache:${language}`;
+    const installed = await redisClient.smembers(pkgSetKey);
+    const toInstall = payload.packages.filter((p: string) => !installed.includes(p));
+
+    const pkgVolumeName = `srai-pkg-${language}`;
+    
+    try {
+      await dockerClient.getVolume(pkgVolumeName).inspect();
+    } catch (e) {
+      await dockerClient.createVolume({ Name: pkgVolumeName });
+      
+      const chownContainer = await dockerClient.createContainer({
+        Image: image,
+        User: "root",
+        Cmd: ["chown", "-R", "2000:2000", "/pkg_cache"],
+        HostConfig: {
+          Binds: [`${pkgVolumeName}:/pkg_cache:rw`],
+        },
+      });
+      try {
+        await chownContainer.start();
+        await chownContainer.wait();
+      } catch (err) { }
+      finally { await chownContainer.remove({ force: true }).catch(() => {}); }
+    }
+
+    if (toInstall.length > 0) {
+      publishChunk(jobId, "system", `[system] Installing packages: ${toInstall.join(", ")}\r\n`);
+      
+      const pkgCmd = language === "nodejs" 
+        ? ["npm", "install", "--prefix", "/pkg_cache", ...toInstall, "--quiet", "--no-fund", "--no-audit"]
+        : ["pip", "install", "--target", "/pkg_cache", ...toInstall, "--quiet", "--no-color"];
+        
+      const pkgContainer = await dockerClient.createContainer({
+        Image: image,
+        Cmd: pkgCmd,
+        HostConfig: { Binds: [`${pkgVolumeName}:/pkg_cache:rw`] },
+        User: "sandbox",
+      });
+      
+      let pkgStdout = "";
+      let pkgStderr = "";
+      
+      await pkgContainer.start();
+      const pkgLogStream = await pkgContainer.logs({ follow: true, stdout: true, stderr: true });
+      const pkgStdoutStream = new PassThrough();
+      const pkgStderrStream = new PassThrough();
+      
+      pkgStdoutStream.on("data", chunk => pkgStdout += chunk.toString("utf8"));
+      pkgStderrStream.on("data", chunk => pkgStderr += chunk.toString("utf8"));
+      
+      pkgContainer.modem.demuxStream(pkgLogStream, pkgStdoutStream, pkgStderrStream);
+      
+      await pkgContainer.wait();
+      const inspect = await pkgContainer.inspect();
+      await pkgContainer.remove({ force: true }).catch(() => {});
+      
+      if (inspect.State.ExitCode !== 0) {
+        publishChunk(jobId, "stderr", pkgStderr);
+        publishChunk(jobId, "system", `[system] Package installation failed with exit code ${inspect.State.ExitCode}\r\n`);
+        
+        await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+        
+        return {
+          stdout: pkgStdout,
+          stderr: pkgStderr,
+          exitCode: inspect.State.ExitCode,
+          durationMs: 0,
+          memoryUsedMb: 0
+        };
+      }
+      
+      await redisClient.sadd(pkgSetKey, ...toInstall);
+    }
+    
+    binds.push(`${pkgVolumeName}:/pkg_cache:rw`);
+  }
+
+  const env = [];
+  if (payload.packages && payload.packages.length > 0) {
+    if (language === "nodejs") {
+      env.push("NODE_PATH=/pkg_cache/node_modules");
+    } else {
+      env.push("PYTHONPATH=/pkg_cache");
+    }
+  }
+
   const container = await dockerClient.createContainer({
     Image: image,
     Cmd: cmd,
+    Env: env,
     HostConfig: {
       Binds: binds,
       NetworkMode: "none",

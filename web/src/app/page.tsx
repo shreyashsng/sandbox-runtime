@@ -27,6 +27,48 @@ function SandboxEditor() {
     terminalRef.current?.clear();
     terminalRef.current?.write("[system] sending execution request...\r\n", "system");
 
+    // Automatically detect packages from code to showcase Phase 4 in the demo!
+    const packages: string[] = [];
+    if (language === "python") {
+      const importRegex = /^\s*(?:import|from)\s+([a-zA-Z0-9_\-\.]+)/gm;
+      let match;
+      const seen = new Set<string>();
+      const stdlib = new Set([
+        "os", "sys", "time", "json", "math", "urllib", "random", "datetime", 
+        "subprocess", "hashlib", "re", "collections", "itertools", "functools", 
+        "pathlib", "shutil", "tempfile", "io", "csv", "ast", "asyncio", "threading", 
+        "queue", "socket", "select", "ssl", "logging", "argparse", "uuid", "base64", 
+        "typing", "warnings", "traceback", "inspect", "platform", "gc", "weakref", 
+        "copy", "bisect", "array", "contextlib", "sqlite3"
+      ]);
+      while ((match = importRegex.exec(code)) !== null) {
+        const pkg = match[1].split(".")[0];
+        if (!stdlib.has(pkg) && !seen.has(pkg)) {
+          seen.add(pkg);
+          packages.push(pkg);
+        }
+      }
+    } else if (language === "nodejs") {
+      const requireRegex = /require\(['"]([a-zA-Z0-9\-_.@/]+)['"]\)/g;
+      const importRegex = /from\s+['"]([a-zA-Z0-9\-_.@/]+)['"]/g;
+      const seen = new Set<string>();
+      let match;
+      while ((match = requireRegex.exec(code)) !== null) {
+        const pkg = match[1].startsWith(".") ? null : match[1].split("/")[0];
+        if (pkg && !seen.has(pkg)) {
+          seen.add(pkg);
+          packages.push(pkg);
+        }
+      }
+      while ((match = importRegex.exec(code)) !== null) {
+        const pkg = match[1].startsWith(".") ? null : match[1].split("/")[0];
+        if (pkg && !seen.has(pkg)) {
+          seen.add(pkg);
+          packages.push(pkg);
+        }
+      }
+    }
+
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/execute`, {
         method: "POST",
@@ -34,11 +76,25 @@ function SandboxEditor() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${process.env.NEXT_PUBLIC_DEV_API_KEY}`,
         },
-        body: JSON.stringify({ language, code, sessionId: sessionId || undefined }),
+        body: JSON.stringify({ 
+          language, 
+          code, 
+          sessionId: sessionId || undefined,
+          packages: packages.length > 0 ? packages : undefined
+        }),
       });
 
       if (!res.ok) {
-        throw new Error("Execution request failed");
+        let errorMessage = "Execution request failed";
+        try {
+          const errData = await res.json();
+          if (errData.error) {
+            errorMessage = errData.error;
+          }
+        } catch (e) {
+          // fallback to generic message
+        }
+        throw new Error(errorMessage);
       }
 
       const data = await res.json();
