@@ -45,12 +45,12 @@ async function cleanupTempFolders() {
 const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || "5", 10);
 
 const subscriber = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
-subscriber.psubscribe("execution:*");
+subscriber.psubscribe("cancel:*");
 subscriber.on("pmessage", (pattern, channel, messageStr) => {
   try {
     const message = JSON.parse(messageStr);
     if (message.type === "cancel") {
-      const jobId = channel.replace("execution:", "");
+      const jobId = channel.replace("cancel:", "");
       const container = runningContainers.get(jobId);
       if (container) {
         logger.info(`Received cancel for jobId ${jobId}, killing container`);

@@ -82,7 +82,7 @@ router.delete("/:jobId", apiKeyAuth, async (req: Request, res: Response, next: N
         data: { status: "killed" },
       });
     } else if (execution.status === "running") {
-      redisClient.publish(`execution:${execution.jobId}`, JSON.stringify({ type: "cancel" }));
+      redisClient.publish(`cancel:${execution.jobId}`, JSON.stringify({ type: "cancel" }));
     }
 
     res.json({ success: true });
